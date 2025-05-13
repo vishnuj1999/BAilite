@@ -4,171 +4,154 @@ import time
 import requests
 from ultralytics import YOLO
 
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////#
-# delay in seconds
-intervel = 0.01
-bot_num = input("Enter bot number : ")
-host = "192.168." + bot_num + ".10"
-cam_host = "192.168." + bot_num + ".14"
+# Block 1: Declarations
+def declare_variables():
+    global blue, red, green, yellow, cyan, magenta, black, white
+    global intervel, D90_turn_delay
 
-def delay(sec):
-    time.sleep(sec)
+    blue = (255, 0, 0)
+    red = (0, 0, 255)
+    green = (0, 255, 0)
+    yellow = (0, 255, 255)
+    cyan = (255, 255, 0)
+    magenta = (255, 0, 255)
+    black = (0, 0, 0)
+    white = (255, 255, 255)
 
-def bot_move(com):
-    try:
-        response = requests.get(f"http://{host}/?cmd={com}")
-        if response.status_code == 200:
-            print(f"bot_move({com})")
-        else:
-            print(f"Failed to send command. HTTP Status Code: {response.status_code}")
-        delay(intervel)
-    except requests.exceptions.HTTPError as errh:
-        print(f"HTTP Error: {errh}")
-    except requests.exceptions.RequestException as err:
-        print(f"Request Exception - Move: {err}")
+    intervel = 0.01
+    D90_turn_delay = 500
 
-def bot_speed(l_pwm, r_pwm):
-    print(f"bot_speed(L : {l_pwm} | R : {r_pwm})")
-    try:
-        response = requests.get(f"http://{host}/?cmd=setspeed={l_pwm, r_pwm}")
-        if response.status_code == 200:
-            pass
-    except requests.exceptions.HTTPError as errh:
-        print(f"HTTP Error: {errh}")
-    except requests.exceptions.RequestException as err:
-        print(f"Request Exception - Speed: {err}")
+# Block 2: Bot Control Functions
+def bot_control_functions():
+    def delay(sec):
+        time.sleep(sec)
 
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////#
+    def bot_move(com):
+        try:
+            response = requests.get(f"http://{host}/?cmd={com}")
+            if response.status_code == 200:
+                print(f"bot_move({com})")
+            else:
+                print(f"Failed to send command. HTTP Status Code: {response.status_code}")
+            delay(intervel)
+        except requests.exceptions.RequestException as err:
+            print(f"Request Exception - Move: {err}")
 
-bb_size = 150
+    def bot_speed(l_pwm, r_pwm):
+        print(f"bot_speed(L : {l_pwm} | R : {r_pwm})")
+        try:
+            requests.get(f"http://{host}/?cmd=setspeed={l_pwm, r_pwm}")
+        except requests.exceptions.RequestException as err:
+            print(f"Request Exception - Speed: {err}")
 
-turn_delay = 100
-D90_turn_delay = 500
-
-speed_val = 130
-pwm_corr = 5
-
-def delay(sec):
-    time.sleep(sec)
-
-def initial_forward(bool):
-    if bool == "true":
-        bot_move("f")
-        print("Initial Forward")
-
-def stop():
-    bot_move("s")
-    print("stop")
-
-def sign_detection(classname, wid, hght):
-    if classname == "go":
-        bot_move(f"f(500)")
-    elif classname == "left":
-        bot_move(f"l({D90_turn_delay})")
-        # bot_move(f"lf({D90_turn_delay})")
-    elif classname == "right":
-        bot_move(f"r({D90_turn_delay})")
-        # bot_move(f"rf({D90_turn_delay})")
-    elif classname == "stop":
+    def stop():
         bot_move("s")
+        print("stop")
 
-#///////////////////////////////////////////////////////////////////////////////////////////////////////////#
+    def sign_detection(classname):
+        if classname == "go":
+            bot_move("f(500)")
+        elif classname == "left":
+            bot_move(f"l({D90_turn_delay})")
+        elif classname == "right":
+            bot_move(f"r({D90_turn_delay})")
+        elif classname == "stop":
+            bot_move("s")
 
-# Colour Codes
-blue = (255, 0, 0)
-red = (0, 0, 255)
-green = (0, 255, 0)
-yellow = (0, 255, 255)
-cyan = (255, 255, 0)
-magenta = (255, 0, 255)
-black = (0, 0, 0)
-white = (255, 255, 255)
+    return delay, bot_move, bot_speed, stop, sign_detection
 
-# Start webcam
-cap = cv2.VideoCapture(0)
+# Block 3: Initialize Camera
+def init_camera():
+    return cv2.VideoCapture(0)
 
-MODEL = YOLO("Models/turn-signs-v4_640_yolov8_epo_100.pt")
-CONFIDENCE_SCORE = 0.80
-CLASS_NAME = ['go', 'left', 'right', 'stop']
-CLASS_FILTER = [1]
+# Block 4: Host & Model Configuration
+def init_host_and_model():
+    host = "192.168.20.10"
+    model = YOLO("Models/turn-signs-v4_640_yolov8_epo_100.pt")
+    confidence = 0.80
+    class_names = ['go', 'left', 'right', 'stop']
+    return host, model, confidence, class_names
 
-# Variables for FPS calculation
-start_time = time.time()
-frame_count = 0
-obj_count = 0
+# Block 5: Calculate FPS
+def update_fps(fps_data):
+    frame_counter, start_time = fps_data
+    frame_counter += 1
+    elapsed_time = time.time() - start_time
+    if elapsed_time >= 1.0:
+        fps = frame_counter / elapsed_time
+        frame_counter = 0
+        start_time = time.time()
+    else:
+        fps = 0
+    return fps, frame_counter, start_time
 
-# Initial forward move
-initial_forward("true")
+# Block 6: Perform Detection & Drawing
+def detect_objects(model, img, confidence_score, class_names, obj_count, sign_detection_func):
+    results = model(source=img, conf=confidence_score)
 
-while True:
-    success, img = cap.read()
-    if not success:
-        break
-    # Increment frame count for FPS calculation
-    frame_count += 1
-
-    model = MODEL
-    results = model(source=img, conf=CONFIDENCE_SCORE)
-
-    # Coordinates
     for r in results:
         boxes = r.boxes
         for box in boxes:
             obj_count += 1
-
-            # Bounding box
-            x1, y1, x2, y2 = box.xyxy[0]
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)  # Convert to int values
-
-            # Put box in cam
+            x1, y1, x2, y2 = [int(v) for v in box.xyxy[0]]
             cv2.rectangle(img, (x1, y1), (x2, y2), green, 3)
 
-            # Confidence
             confidence = math.ceil((box.conf[0] * 100)) / 100
-            conf = str(int(confidence * 100))
+            conf_str = str(int(confidence * 100))
 
-            # Class name
             cls = int(box.cls[0])
-
-            # Bounding box size
             width = x2 - x1
             height = y2 - y1
-            print(CLASS_NAME[cls] + " Size : {} x {}".format(width, height))
+            print(f"{class_names[cls]} Size : {width} x {height}")
 
-            # Initial forward
-            initial_forward("false")
-            print("m_count : " + str(obj_count))
-
+            print(f"m_count : {obj_count}")
             if obj_count >= 4:
-                sign_detection(CLASS_NAME[cls], width, height)
+                sign_detection_func(class_names[cls])
                 obj_count = 0
 
-            # Display Bounding Box Size on the screen
-            text_size = "Size: {} x {}".format(width, height)
+            text_size = f"Size: {width} x {height}"
             cv2.putText(img, text_size, (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, cyan, 2)
 
-            # Object details
-            org = [x1, y1]
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            fontScale = 1
-            color = magenta
-            thickness = 2
+            org = (x1, y1)
+            cv2.putText(img, f"{class_names[cls]}:{conf_str}%", org, cv2.FONT_HERSHEY_SIMPLEX, 1, magenta, 2)
 
-            textcv = CLASS_NAME[cls] + ":" + conf + " %"
-            cv2.putText(img, textcv, org, font, fontScale, color, thickness)
+    return img, obj_count
 
-    # Calculate FPS
-    elapsed_time = time.time() - start_time
-    fps = frame_count / elapsed_time
+# Block 7: Display Image
+def display_frame(img, fps):
+    cv2.putText(img, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, cyan, 2)
+    cv2.imshow("Bot Webcam", img)
 
-    # Display FPS on the screen
-    cv2.putText(img, "FPS: {:.2f}".format(fps), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, cyan, 2)
-    cv2.imshow('Bot Webcam', img)
+# Block 8: Main Loop
+def main_loop():
+    declare_variables()
+    global host
+    host, model, confidence_score, class_names = init_host_and_model()
+    cap = init_camera()
 
-    if cv2.waitKey(1) == ord('q'):
-        print("Quit 'q' was pressed.")
-        stop()
-        break
+    delay, bot_move, bot_speed, stop, sign_detection_func = bot_control_functions()
 
-cap.release()
-cv2.destroyAllWindows()
+    frame_counter = 0
+    start_time = time.time()
+    obj_count = 0
+
+    while True:
+        ret, img = cap.read()
+        if not ret:
+            break
+
+        fps, frame_counter, start_time = update_fps((frame_counter, start_time))
+        img, obj_count = detect_objects(model, img, confidence_score, class_names, obj_count, sign_detection_func)
+        display_frame(img, fps)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            print("Quit 'q' was pressed.")
+            stop()
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+# Block 9: Run Main
+if __name__ == "__main__":
+    main_loop()
